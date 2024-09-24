@@ -1,0 +1,68 @@
+stages:
+  - build
+  - test
+  - deploy
+  - cleanup
+
+variables:
+  IMAGE_NAME: myapp
+  K8S_DEPLOYMENT: myapp-deployment
+  DOCKER_REGISTRY: mydockerregistry.com  # Your Docker registry URL
+  DOCKER_IMAGE: $DOCKER_REGISTRY/$IMAGE_NAME:latest
+
+# Build Stage
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t $DOCKER_IMAGE ./dockerfiles
+    - echo "Logging into Docker registry"
+    - echo $DOCKER_PASSWORD | docker login $DOCKER_REGISTRY -u $DOCKER_USERNAME --password-stdin
+    - docker push $DOCKER_IMAGE
+  only:
+    - main
+    - develop
+
+# Test Stage
+test:
+  stage: test
+  image: node:latest  # Assuming tests are run using Node.js
+  script:
+    - npm install
+    - npm test
+  only:
+    - main
+    - develop
+
+# Deploy Stage
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - echo "Deploying to Kubernetes"
+    - kubectl apply -f microservices/k8s-manifests/deployments/myapp-deployment.yaml
+    - kubectl apply -f microservices/k8s-manifests/services/myapp-service.yaml
+  only:
+    - main
+
+# Cleanup Stage
+cleanup:
+  stage: cleanup
+  script:
+    - echo "Cleaning up old Docker images"
+    - docker rmi $(docker images -f "dangling=true" -q) || true
+  when: manual  # Run this stage manually to avoid accidental cleanups
+  only:
+    - main
+
+# Notifications (Optional)
+notify:
+  stage: deploy
+  script:
+    - echo "Sending deployment notifications..."
+    - curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment to Kubernetes was successful!"}' $SLACK_WEBHOOK_URL
+  only:
+    - main
+  when: on_success
